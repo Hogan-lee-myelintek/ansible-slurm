@@ -15,6 +15,8 @@ For the various roles a slurm node can play, you can either set group names, or 
 - group slurmservers or `slurm_roles: ['controller']`
 - group slurmexechosts or `slurm_roles: ['exec']`
 - group slurmdbdservers or `slurm_roles: ['dbd']`
+- group slurmdbservers or `slurm_roles: ['db']`
+- group slurmlogins or `slurm_roles: ['slogin']`
 
 General config options for slurm.conf go in `slurm_config`, a hash. Keys are Slurm config option names.
 

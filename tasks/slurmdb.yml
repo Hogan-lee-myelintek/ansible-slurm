@@ -1,0 +1,88 @@
+---
+
+- name: Validate that 'slurm_db' group exists and contains less than or equal to ONE host
+  ansible.builtin.assert:
+    that:
+      - "'slurm_db' in groups"
+      - groups['slurm_db'] | length <= 1
+    fail_msg: "[slurm_db] Currently, only less than or equal to one instance is supported."
+
+- name: Check if MariaDB service exists
+  ansible.builtin.command: systemctl is-active mariadb
+  register: mariadb_service_check
+  failed_when: false
+  changed_when: false
+
+- name: Check if target database ({{ __slurmdbd_config_merged.StorageLoc }}) already exists
+  community.mysql.mysql_db:
+    name: "{{ __slurmdbd_config_merged.StorageLoc }}"
+    state: present
+    login_unix_socket: /run/mysqld/mysqld.sock
+  register: db_check
+  failed_when: false
+  changed_when: false
+  when: mariadb_service_check.rc == 0
+
+- name: Set fact for installation necessity
+  ansible.builtin.set_fact:
+    need_mariadb_setup: "{{ mariadb_service_check.rc != 0 or db_check.failed | default(true) or (mariadb_force_reconfigure | default(false) | bool) }}"
+
+- name: Install MariaDB server, client, and Python MySQL library
+  ansible.builtin.apt:
+    name:
+      - mariadb-server
+      - mariadb-client
+      - python3-pymysql
+    state: present
+    update_cache: true
+  when: need_mariadb_setup
+
+- name: Ensure MariaDB service is running and enabled
+  ansible.builtin.systemd:
+    name: mariadb
+    state: started
+    enabled: true
+
+- name: Create Slurm accounting database ({{ __slurmdbd_config_merged.StorageLoc }})
+  community.mysql.mysql_db:
+    name: "{{ __slurmdbd_config_merged.StorageLoc }}"
+    state: present
+    login_unix_socket: /run/mysqld/mysqld.sock
+
+- name: Create MariaDB user ({{ __slurmdbd_config_merged.StorageUser }}) for localhost
+  community.mysql.mysql_user:
+    name: "{{ __slurmdbd_config_merged.StorageUser }}"
+    password: "{{ __slurmdbd_config_merged.StoragePass }}"
+    priv: "{{ __slurmdbd_config_merged.StorageLoc }}.*:ALL"
+    host: "localhost"
+    state: present
+    login_unix_socket: /run/mysqld/mysqld.sock
+
+- name: Create MariaDB user ({{ __slurmdbd_config_merged.StorageUser }}) for remote subnet
+  community.mysql.mysql_user:
+    name: "{{ __slurmdbd_config_merged.StorageUser }}"
+    password: "{{ __slurmdbd_config_merged.StoragePass }}"
+    priv: "{{ __slurmdbd_config_merged.StorageLoc }}.*:ALL"
+    host: "{{ mariadb_remote_subnet }}"
+    state: present
+    login_unix_socket: /run/mysqld/mysqld.sock
+  when: mariadb_allow_remote | bool
+
+- name: Configure MariaDB bind-address
+  ansible.builtin.lineinfile:
+    path: /etc/mysql/mariadb.conf.d/50-server.cnf
+    regexp: '^bind-address\s*='
+    line: "bind-address            = {{ '0.0.0.0' if mariadb_allow_remote | bool else '127.0.0.1' }}"
+    state: present
+  notify: Restart mariadb
+
+- name: Restart MariaDB service
+  ansible.builtin.systemd:
+    name: "{{ slurmdb_service_name }}"
+    state: restarted
+
+- name: Ensure slurmdb is enabled and running
+  ansible.builtin.service:
+    name: "{{ slurmdb_service_name }}"
+    enabled: true
+    state: started

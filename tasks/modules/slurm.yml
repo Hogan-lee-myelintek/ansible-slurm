@@ -1,0 +1,119 @@
+---
+
+- name: Enable deb-src in ubuntu.sources for Ubuntu 24.04 / 26.04 (DEB822 format)
+  ansible.builtin.replace:
+    path: /etc/apt/sources.list.d/ubuntu.sources
+    regexp: '^(Types:\s*deb)$'
+    replace: 'Types: deb deb-src'
+  when: ansible_distribution == 'Ubuntu' and ansible_distribution_version in ['24.04', '26.04']
+  register: apt_sources_updated
+
+- name: Update APT cache if sources were modified
+  ansible.builtin.apt:
+    update_cache: true
+  when: apt_sources_updated.changed
+
+- name: Install build dependencies for slurm-wlm
+  ansible.builtin.apt:
+    pkg:
+      - slurm-wlm
+    state: build-dep
+
+- name: Create build workspace directory
+  ansible.builtin.file:
+    path: "{{ slurm_build_workspace }}"
+    state: directory
+    mode: '0755'
+
+- name: Check if Slurm source is already downloaded
+  ansible.builtin.find:
+    paths: "{{ slurm_build_workspace }}"
+    file_type: directory
+    patterns: "slurm-wlm-*"
+  register: existing_slurm_src
+
+- name: Download slurm-client source code via APT
+  ansible.builtin.command:
+    cmd: apt-get source slurm-client
+    chdir: "{{ slurm_build_workspace }}"
+  when: existing_slurm_src.matched == 0
+
+- name: Get downloaded Slurm source directory name
+  ansible.builtin.find:
+    paths: "{{ slurm_build_workspace }}"
+    file_type: directory
+    patterns: "slurm-wlm-*"
+  register: slurm_src_dir
+
+- name: Set fact for Slurm source path and extracted version
+  ansible.builtin.set_fact:
+    slurm_src_path: "{{ slurm_src_dir.files[0].path }}"
+    slurm_version_extracted: "{{ slurm_src_dir.files[0].path | basename | regex_replace('^slurm-wlm-', '') }}"
+
+- name: Check if Slurm is already installed at prefix
+  ansible.builtin.stat:
+    path: "{{ slurm_install_prefix }}/{{ slurm_version_extracted }}/bin/srun"
+  register: slurm_installed_check
+
+- name: Configure Slurm source
+  ansible.builtin.command:
+    cmd: "./configure --prefix={{ slurm_install_prefix }}/{{ slurm_version_extracted }}"
+    chdir: "{{ slurm_src_path }}"
+  when: not slurm_installed_check.stat.exists
+
+- name: Disable documentation build in doc/Makefile
+  ansible.builtin.replace:
+    path: "{{ slurm_src_path }}/doc/Makefile"
+    regexp: '^SUBDIRS\s*=.*'
+    replace: 'SUBDIRS ='
+  when: not slurm_installed_check.stat.exists
+
+- name: Build and install Slurm
+  ansible.builtin.shell:
+    cmd: "make -j$(nproc) && make install"
+    chdir: "{{ slurm_src_path }}"
+  become: True
+  when: not slurm_installed_check.stat.exists
+
+- name: Ensure Lmod modulefile directory exists
+  ansible.builtin.file:
+    path: "{{ slurm_modulefile_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Create slurm directory
+  ansible.builtin.file:
+    path: "{{ slurm_install_prefix }}/{{ slurm_version_extracted }}/etc/slurm"
+    state: directory
+    mode: '0755'
+
+- name: Install slurm.conf
+  ansible.builtin.template:
+    src: "slurm.conf.j2"
+    dest: "{{ slurm_install_prefix }}/{{ slurm_version_extracted }}/etc/slurm/slurm.conf"
+    owner: root
+    group: root
+    mode: 0444
+
+- name: Create Slurm Lmod modulefile
+  ansible.builtin.copy:
+    dest: "{{ slurm_modulefile_dir }}/{{ slurm_version_extracted }}"
+    mode: '0644'
+    content: |
+      #%Module1.0#######################################################################
+      ## slurm modulefile
+      ##
+      proc ModulesHelp { } {
+        puts stderr "\tAdds Slurm to your environment"
+      }
+
+      module-whatis   "Adds Slurm to your environment"
+
+      set              slurm_root            {{ slurm_install_prefix }}/{{ slurm_version_extracted }}
+
+      setenv           SLURM_CONF            $slurm_root/etc/slurm/slurm.conf
+
+      prepend-path     PATH                  $slurm_root/bin
+      prepend-path     PATH                  $slurm_root/sbin
+      prepend-path     LD_LIBRARY_PATH       $slurm_root/lib
+

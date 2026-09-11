@@ -16,6 +16,13 @@ slurm_configure_munge: true
 slurmd_service_name: slurmd
 slurmctld_service_name: slurmctld
 slurmdbd_service_name: slurmdbd
+slurmdb_service_name: mariadb
+
+slurm_build_workspace: "/tmp/slurm_build_workspace"
+slurm_install_prefix: "/opt/lmod/slurm"
+slurm_modulefile_dir: "/etc/lmod/modules/slurm"
+
+slurm_enable_lmod: false
 
 #Cluster name for slurm config. This is required to correctly setup slurmdbd and attune it to the slurm config.
 __slurm_cluster_name: cluster
@@ -75,12 +82,14 @@ __slurm_config_merged: "{{ __slurm_config_default | combine(slurm_config | defau
 
 __slurm_debian_packages:
   client: [slurm-client, slurm-wlm-doc]
+  login: [munge, lmod]
   slurmctld: [slurm-wlm]
   slurmd: [slurm-wlm]
   slurmdbd: [slurmdbd]
 
 __slurm_redhat_packages:
   client: [slurm, munge]
+  login: [munge, lmod]
   slurmctld: [munge, slurm, slurm-slurmctld]
   slurmd: [munge, slurm, slurm-slurmd]
   slurmdbd: [munge, slurm-slurmdbd]

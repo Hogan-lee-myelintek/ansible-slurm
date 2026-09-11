@@ -1,0 +1,11 @@
+---
+
+- name: Install source code building packages
+  ansible.builtin.apt:
+    name:
+      - build-essential
+    state: present
+    update_cache: true
+
+- name: Include slurm module tasks
+  ansible.builtin.include_tasks: modules/slurm.yml

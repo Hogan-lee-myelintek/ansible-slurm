@@ -1,0 +1,18 @@
+---
+
+- name: Install Slurm login packages
+  ansible.builtin.package:
+    name: "{{ __slurm_packages.login }}"
+    state: "{{ 'latest' if slurm_upgrade else 'present' }}"
+
+- name: Include lmod install and configure tasks
+  ansible.builtin.include_tasks: lmod.yml
+  when: slurm_enable_lmod
+
+- name: (TODO) Install Open OnDemand
+  ansible.builtin.debug:
+    msg: "Install Open OnDemand"
+
+- name: Include munge tasks
+  ansible.builtin.include_tasks: munge.yml
+  when: slurm_configure_munge
